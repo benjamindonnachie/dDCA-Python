@@ -3,7 +3,7 @@
 
 Implementation of Deterministic Dendritic Cell Algorithm
   Based on original code by Dr Julie Greensmith (27/03/2008)
-  Subsequently modified by Feng Gu on 11/07/2008
+    Which was subsequently modified by Feng Gu on 11/07/2008
 
 @author: Benjamin Donnachie  <benjamin.donnachie@open.ac.uk>
 
@@ -31,6 +31,7 @@ To do:
 Change log:
     
     2021/06/30 initial implementation
+    2021/07/29 Improved graphing
 
 """
 
@@ -43,14 +44,22 @@ import matplotlib.pyplot as plt
 # Data file directory
 directory = "C:\\Users\\benja\\Documents\\plaso\\plaso-v20210606"
 
+# Save output?
+SAVEoutput = 'n'
+
+SAMPLESIZE='30T'
+
+# initialise DDCA
+CELLS = 2
+MAXmigration = 100
+#ANTIGEN = 99999
+# calculate lifespan and then allocated
+tr_interval = MAXmigration / (CELLS - 1)
+
 for entry in os.scandir(directory):
     if (entry.path.endswith(".dyn") and entry.is_file()):
         print("Loading data from ", entry.path)
         
-        ## Stacked vertical plots
-        #fig, axs = plt.subplots(4, sharex=True)
-        #fig.suptitle(entry.path)
-
         # Read csv
         log2timeline = pd.read_csv(entry.path)
 
@@ -58,31 +67,38 @@ for entry in os.scandir(directory):
         log2timeline['datetime']= pd.to_datetime(log2timeline['datetime'], errors='coerce')
 
         # Create a summary of activity in min chunks (Replace 1T with variable)
-        summary_timeline = log2timeline.set_index("datetime").resample('1T').apply('count')
+        summary_timeline = log2timeline.set_index("datetime").resample(SAMPLESIZE).apply('count')
         
-        # Remove any empty summary chunks
-        summary_timeline = summary_timeline.loc[(summary_timeline != 0).any(axis=1)]
+        # Don't # Remove any empty summary chunks
+        #summary_timeline = summary_timeline.loc[(summary_timeline != 0).any(axis=1)]
         
         # Remove unneeded columns and rename to tidy up
         summary_timeline.rename(columns={'tag': 'count'}, inplace=True)
         summary_timeline.drop(summary_timeline.columns.difference(['count']), axis=1, inplace=True)
         
+        # Use number of slices to get ANTIGENs
+        ANTIGEN = len(summary_timeline)
+            
+        print("Using ANTIGEN count of", ANTIGEN)
         
         # Calculate safe and danger
         #  Danger - percentage of how close to half maximum (ie 2 * 100 = 200)                   
         summary_timeline['danger'] = summary_timeline['count'] * 200 / summary_timeline.max()['count']
-        # Cap at 0 - 100
+         # Cap at 0 - 100
         summary_timeline['danger'].loc[(summary_timeline['danger'] > 100)] = 100
         summary_timeline['danger'].loc[(summary_timeline['danger'] < 0)] = 0
         
         #  Safe - simple percentage ratio of how close current value is to previous value
         summary_timeline['safe'] = 100 - (100 * summary_timeline['count'].pct_change().abs())
-        # Cap at 0 - 100
+         # Cap at 0 - 100
         summary_timeline['safe'].loc[(summary_timeline['safe'] > 100)] = 100
         summary_timeline['safe'].loc[(summary_timeline['safe'] < 0)] = 0
         
         # Correct first safe value - calculated as NAN
         summary_timeline['safe'][0] = 0
+        
+        # Temporary work around for pct_change() returning NaN with repeated zero counts.
+        summary_timeline = summary_timeline.fillna(100) 
         
        # For comparison with original code, write output to text file
 #        outputFile = open (entry.path + ".log", 'w')
@@ -92,35 +108,8 @@ for entry in os.scandir(directory):
 #                             " " + str(summary_timeline['safe'][i]) + "\n")
 #            outputFile.write(str(i) + " antigen " + str(i) + "\n")
 #        outputFile.close()
-
-        
-        # Plot summary
-        #plt.title(entry.path)
-        #plt.yscale("Log")
-        #plt.scatter(summary_timeline.index.values, summary_timeline['count'])
-        #plt.show()
-       
-        #axs[0].title.set_text("Count")
-        #axs[0].semilogy(summary_timeline.index.values, summary_timeline['count'], label='Count')
-        
-        
-        # Plot safe and danger
-        #plt.title("Safe / Danger " + entry.path)
-        #plt.yscale("Linear")
-        #plt.scatter(summary_timeline.index.values, summary_timeline['danger'])
-        #plt.scatter(summary_timeline.index.values, summary_timeline['safe'])
-        #plt.show()
-        
-        #axs[1].title.set_text("Danger / Safe")
-        #axs[1].scatter(summary_timeline.index.values, summary_timeline['danger'], color='r', label='Danger')
-        #axs[1].scatter(summary_timeline.index.values, summary_timeline['safe'], color='g', label='Safe')
-
         # initialise DDCA
-        CELLS = 2
-        MAXmigration = 100
-        ANTIGEN = 99999
-        # calculate lifespan and then allocated
-        tr_interval = MAXmigration / (CELLS - 1)
+        
         # Comments from original code included.
         DDCAcell = {'lifespan': np.linspace(0, MAXmigration, CELLS), # migration threshold countdown
                                   'k': np.zeros(CELLS), # anomaly output variable
@@ -140,12 +129,7 @@ for entry in os.scandir(directory):
         cellIndex = 0;
         
         # Iterate over summary timeline - use index as antigen value to allow linking back
-        for i in range(len(summary_timeline)) :
-        #for i in range(10) :
-           #print(i, 
-           #      summary_timeline['danger'][i], 
-           #      summary_timeline['safe'][i])
-           
+        for i in range(len(summary_timeline)) :           
            # do_signals()           
            # csm = safe + danger
            csm = summary_timeline['danger'][i] + summary_timeline['safe'][i]
@@ -160,8 +144,7 @@ for entry in os.scandir(directory):
                DDCAcell['lifespan'][counter] -= csm
                DDCAcell['k'][counter] += k
                DDCAcell['iter'][counter] += 1
-               #print ("Updated lifespan ",DDCAcell['lifespan'][counter]," k ",DDCAcell['k'][counter], 
-               #       " iter ", DDCAcell['iter'][counter])
+
                if (DDCAcell['lifespan'][counter] <= 0) :
                    #print ("*** Lifespan below zero, logging antigen ***")
                    # log antigen()
@@ -195,7 +178,7 @@ for entry in os.scandir(directory):
           
         # Flush cells
         for counter in range (CELLS):
-            # Repeat log_antigen() - make function
+            # Repeat log_antigen() - should make this a function
             for antigenCounter in range (ANTIGEN) :
                 if (DDCAcell['antigen'][counter][antigenCounter] > 0) :
                     DDCAcell['totAg'][counter] += DDCAcell['antigen'][counter][antigenCounter]
@@ -209,7 +192,7 @@ for entry in os.scandir(directory):
                                    
                     DDCAcell['antigen'][counter][antigenCounter] = 0
             
-           # dc_stats
+           # dc_stats (Only concerned with results here)
            #for counter in range (CELLS): 
            #    if DDCAcell['incarnations'][counter] > 0 :
            #        iterIncarn = DDCAcell['totIter'][counter] / DDCAcell['incarnations'][counter]
@@ -217,80 +200,66 @@ for entry in os.scandir(directory):
            #        iterIncarn = DDCAcell['totIter'][counter]
            
         # Now result() 
+        #  Add mcav and ka fields.
         summary_timeline['mcav'] = np.zeros(len(summary_timeline))
         summary_timeline['ka'] = np.zeros(len(summary_timeline))
 
         for antigenCounter in range (ANTIGEN) :
             if (agtype['m'][antigenCounter] + agtype['s'][antigenCounter] != 0) :
-                #print ("Updating MCAV and k at ", antigenCounter)
                 summary_timeline['mcav'][antigenCounter] = agtype['m'][antigenCounter] / (agtype['m'][antigenCounter] + agtype['s'][antigenCounter])
                 summary_timeline['ka'][antigenCounter] = agtype['k'][antigenCounter] / (agtype['m'][antigenCounter] + agtype['s'][antigenCounter])
-#                outputFile.write("AgType " + str(antigenCounter) + " " +
-#                                 str(summary_timeline['mcav'][antigenCounter]) + " " +
-#                                 str(summary_timeline['ka'][antigenCounter]) + " -> " +
-#                                 str(summary_timeline.index[antigenCounter]) + "\n")
            
-        # For comparison with original code, write output to text file
-#        outputFile = open (entry.path + ".output.csv", 'w')
-#        print ("Writing antigen profiles to ", entry.path + ".output.csv")
+        if (SAVEoutput == 'y') :
+            # For comparison with original code, write output to text file
+            outputFile = open (entry.path + ".output.csv", 'w')
+            print ("Writing antigen profiles to ", entry.path + ".output.csv")
         
-# write complete results to csv
- #       outputFile.write("antigen,datatime,count,danger,safe,mcav,ka\n")
- #       for i in range(len(summary_timeline)) :
- #           outputFile.write(str(i) + "," + 
- #                            str(summary_timeline.index[i]) + "," +
- #                            str(summary_timeline['count'][i]) + "," +
- #                            str(summary_timeline['danger'][i]) + "," +
- #                            str(summary_timeline['safe'][i]) + "," +
- #                            str(summary_timeline['mcav'][i]) + "," +
- #                            str(summary_timeline['ka'][i]) + "\n")
- #                                           
- #       outputFile.close()
-                   
+            # write complete results to csv
+            outputFile.write("antigen,datatime,count,danger,safe,mcav,ka\n")
+            for i in range(len(summary_timeline)) :
+                outputFile.write(str(i) + "," + 
+                                 str(summary_timeline.index[i]) + "," +
+                                 str(summary_timeline['count'][i]) + "," +
+                                 str(summary_timeline['danger'][i]) + "," +
+                                 str(summary_timeline['safe'][i]) + "," +
+                                 str(summary_timeline['mcav'][i]) + "," +
+                                 str(summary_timeline['ka'][i]) + "\n")
+            outputFile.close()
+            
+        try :
+            # Also save as a pickle
+            summary_timeline.to_pickle(entry.path + ".output.pkl")
+            print("Successful pickle file")
+        except :
+            print("*** Pickle save failed ***")           
+            
         # Graph results
-        
-        #plt.title("MCAV " + entry.path)
-        #plt.yscale("Linear")
-        #plt.scatter(summary_timeline.index.values, summary_timeline['mcav'])
-        #plt.show()
-
-        #plt.title("Ka " + entry.path)
-        #plt.yscale("Linear")
-        #plt.scatter(summary_timeline.index.values, summary_timeline['ka'])
-        #plt.show()
-        #axs[2].title.set_text("mcav")
-
-
-        # Stacked vertical plots
+         # Stacked vertical plots
         fig, axs = plt.subplots(3, sharex=True)
         fig.suptitle(entry.path)
-        plt.xlabel("Activity per 1T segment")
+        plt.xlabel("Activity per " + SAMPLESIZE + " segment")
         
+        # Plot count
         axs[0].set_yscale('log')
-        axs[0].scatter(summary_timeline.index.values, summary_timeline['count'], 
+        axs[0].plot(summary_timeline.index.values, summary_timeline['count'], 
                        marker="*", label='Count')
         axs[0].legend(loc='best')
+        axs[0].set_ylabel("Activity count")
         
-        axs[1].scatter(summary_timeline.index.values, summary_timeline['danger'], 
-                       color='r', marker='.', alpha=0.5, label='Danger')
-        axs[1].scatter(summary_timeline.index.values, summary_timeline['safe'], 
-                       color='g', marker='.', alpha=0.5, label='Safe')
+        # Plot danger / safe
+        axs[1].scatter(summary_timeline.index.values, summary_timeline['safe'] + 0.33, 
+                       color='g', marker='x', label='Safe')
+        axs[1].scatter(summary_timeline.index.values, summary_timeline['danger'] - 0.33, 
+                       color='r', marker='+', label='Danger')
         axs[1].legend(loc='best')
+        axs[1].set_ylabel("Calculated inputs")
         
-        #axs[2].scatter(summary_timeline.index.values, summary_timeline['mcav'], label='MCAV')
-        #axs[2].legend(loc='best')
-                
-        #axs[3].title.set_text("Ka")
-        #axs[3].scatter(summary_timeline.index.values, summary_timeline['ka'], color='k', label='ka')
-        
-        # Use MCAV to change colour of Ka
-        
+        # Plot Ka using MCAV to change colour of plot
         axs[2].scatter(summary_timeline.index.values, summary_timeline['ka'], 
                        c=summary_timeline['mcav'], cmap=plt.cm.seismic, label='ka')
         axs[2].axhline(color="red", linestyle=":")
         axs[2].legend(loc='best')
+        axs[2].set_ylabel("Anomaly output")
         
         fig.show()
-        
-        #input("Press Enter to process next file...")
-                 
+        break         
