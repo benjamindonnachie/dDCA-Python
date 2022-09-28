@@ -61,13 +61,21 @@ class dDCA_cells:
             # evenly distribute migration count across cells
             self.maxLifespan = id * maxMigration / (maxCells - 1)
             self.lifespan = self.maxLifespan
-            self.k = float(0.0)  # anomaly output
-            self.iter = 0
-            self.incarnations = 0
+            self.k = float(0.0)
             self.TotIter = 0
-            self.TotAntigen = 0  # Total antigen a DC collected per incarnation
+            self.iter = 0
+            self.TotAntigen = 0
+            self.incarnations = 0
             self.antigen = np.zeros(antigenCount, dtype=np.int32)
 
+    def reset(self):
+            self.lifespan = self.maxLifespan
+            self.k = float(0.0)
+            self.TotIter += self.iter
+            self.iter = 0
+            self.TotAntigen = 0 # Total antigen a DC collected per incarnation
+            self.incarnations += 1
+        
 
 class dDCA:
     def __init__(self, cells, antigenCount, maxMigration):
@@ -105,46 +113,30 @@ class dDCA:
         
 
     def updateDC(self, K, csm, j):
+        # consider moving to a function of dDCA_cells - although needs to call
+        # logAntigen function, could return lifespan instead.
         self.DCs[j].lifespan -= csm
         self.DCs[j].k += K
         self.DCs[j].iter += 1
         
         if (self.DCs[j].lifespan <= 0):
             # If lifespan exhausted, pass antigen to master antigen profile
-            self.logAntigen(self.DCs[j].id)
+            self.logAntigen(self.DCs[j].id) # or just use j.
             # reinitialise
-            self.DCs[j].lifespan = self.DCs[j].maxLifespan
-            self.DCs[j].k = 0
-            self.DCs[j].TotIter += self.DCs[j].iter
-            self.DCs[j].iter = 0
-            self.DCs[j].TotAntigen = 0
-            self.DCs[j].incarnations += 1
-            
+            self.DCs[j].reset()
+           
 
     def logAntigen(self, id):
-#       self.DCs[id].TotAntigen += sum(self.DCs[id].antigen)
-#       for q in np.nonzero(self.DCs[id].antigen)[0]:
-#           self.k[q] += self.DCs[id].antigen[q]
-#           if (self.DCs[id].k > 0):
-#               self.m[q] += 1
-#           else:
-#               self.s[q] += 1
-#               
-#           self.DCs[id].antigen[q] = 0
-
-    # log antigen() code adopated from v0.10 with minimal optimisation                 
+    # log antigen() code adopated from v0.10 - optimisation opportunity.                
         if (np.count_nonzero(self.DCs[id].antigen) > 0) :
             for antigenCounter in (self.DCs[id].antigen.nonzero()) :
-                #DDCAcell['totAg'][counter] += DDCAcell['antigen'][counter][antigenCounter] # Is totAg used for anything?  Remove?
-                #print("antigen counter is " + antigenCounter)
+                self.DCs[id].TotAntigen += self.DCs[id].antigen[antigenCounter]
                 for yyCounter in range (self.DCs[id].antigen[antigenCounter][0]) :
-                    #print ("yyCounter entered - cell ", counter, " antigen ", antigenCounter)
                     self.k[antigenCounter] += self.DCs[id].k
                     if (self.DCs[id].k > 0) :
                         self.m[antigenCounter] += 1
                     else:
-                        self.s[antigenCounter] += 1
-                                       
+                        self.s[antigenCounter] += 1                                     
                     self.DCs[id].antigen[antigenCounter] = 0 
 
           
@@ -173,25 +165,25 @@ if __name__ == '__main__':
     
     #if (agCount >2000): agCount=2000
     
-    mydDCAtest = dDCA(2, agCount, 100)
-    
+    #mydDCAtest = dDCA(2, agCount, 100)
+    mydDCAtest = dDCA(100, agCount, 1000)
+        
     print ("Using an ANTIGEN count of ", agCount)
     
     for i in range (agCount) :
         if (i % 5000 == 0) : print (".", end='')
         mydDCAtest.doAntigen(i)
         mydDCAtest.doSignals(summary_timeline['danger'][i], summary_timeline['safe'][i])
-        
     print("")
     
     mydDCAtest.results()
         
     if (agCount < len(summary_timeline)): summary_timeline = summary_timeline.head(agCount)
     
-    summary_timeline['New MCAV'] = mydDCAtest.mcav
-    summary_timeline['New ka'] = mydDCAtest.ka
-    summary_timeline['MCAV difference'] = summary_timeline['mcav'] - summary_timeline['New MCAV']
-    summary_timeline['ka difference'] = summary_timeline['ka'] - summary_timeline['New ka']
-    summary_timeline['combined difference'] = summary_timeline['MCAV difference'] + summary_timeline['ka difference']
+    summary_timeline['100 cell MCAV'] = mydDCAtest.mcav
+    summary_timeline['100 cell ka'] = mydDCAtest.ka
+    summary_timeline['MCAV difference'] = summary_timeline['100 cell MCAV'] - summary_timeline['mcav']
+    summary_timeline['ka difference'] = summary_timeline['100 cell ka'] - summary_timeline['ka']
     
-    print ("Aggregated difference in results is.... ", summary_timeline['combined difference'].sum())
+    print ("Aggregated difference in results is.... ", 
+           (summary_timeline['MCAV difference'] + summary_timeline['ka difference']).sum())
