@@ -200,7 +200,7 @@ if __name__ == '__main__' :
     for entry in os.scandir(directory):
         if (entry.path.endswith(".dyn") and entry.is_file()):
             file_list.append(entry.path)
-            main(entry.path) # remove if multi-threaded
+            main(entry.path) # remove if multi-threaded and use below instead
 
 #    with Pool() as p:
 #      p.map(main, file_list)

@@ -55,11 +55,11 @@ import numpy as np
 import pandas as pd
 
 class dDCA_cells:
-    def __init__(self, id, maxCells, maxMigration, antigenCount):
+    def __init__(self, cellid, maxCells, maxMigration, antigenCount):
             # Initialise dDCA cell using variables from original code
-            self.id = id  # id of this cell
+            self.id = cellid  # id of this cell
             # evenly distribute migration count across cells
-            self.maxLifespan = id * maxMigration / (maxCells - 1)
+            self.maxLifespan = cellid * maxMigration / (maxCells - 1)
             self.lifespan = self.maxLifespan
             self.k = float(0.0)
             self.TotIter = 0
@@ -114,30 +114,29 @@ class dDCA:
 
     def updateDC(self, K, csm, j):
         # consider moving to a function of dDCA_cells - although needs to call
-        # logAntigen function, could return lifespan instead.
+        # logAntigen function, could return lifespan.
         self.DCs[j].lifespan -= csm
         self.DCs[j].k += K
         self.DCs[j].iter += 1
         
         if (self.DCs[j].lifespan <= 0):
             # If lifespan exhausted, pass antigen to master antigen profile
-            self.logAntigen(self.DCs[j].id) # or just use j.
+            self.logAntigen(j)
             # reinitialise
             self.DCs[j].reset()
            
 
-    def logAntigen(self, id):
-    # log antigen() code adopated from v0.10 - optimisation opportunity.                
-        if (np.count_nonzero(self.DCs[id].antigen) > 0) :
-            for antigenCounter in (self.DCs[id].antigen.nonzero()) :
-                self.DCs[id].TotAntigen += self.DCs[id].antigen[antigenCounter]
-                for yyCounter in range (self.DCs[id].antigen[antigenCounter][0]) :
-                    self.k[antigenCounter] += self.DCs[id].k
-                    if (self.DCs[id].k > 0) :
-                        self.m[antigenCounter] += 1
-                    else:
-                        self.s[antigenCounter] += 1                                     
-                    self.DCs[id].antigen[antigenCounter] = 0 
+    def logAntigen(self, cellid):
+        if (np.count_nonzero(self.DCs[cellid].antigen) > 0) :
+            for antigenCounter in (self.DCs[cellid].antigen.nonzero()) :
+                self.DCs[cellid].TotAntigen += self.DCs[cellid].antigen[antigenCounter]
+                #  Note, antigenCounter starts at zero so need to +1 below.
+                self.k[antigenCounter] += self.DCs[cellid].k * (1 + self.DCs[cellid].antigen[antigenCounter])
+                if (self.DCs[cellid].k > 0) :
+                    self.m[antigenCounter] += (1 + self.DCs[cellid].antigen[antigenCounter])
+                else:
+                    self.s[antigenCounter] += (1 + self.DCs[cellid].antigen[antigenCounter])                                
+            self.DCs[cellid].antigen = np.zeros(self.antigen, dtype=np.int32)
 
           
     def results(self):
@@ -163,10 +162,10 @@ if __name__ == '__main__':
     
     agCount = len(summary_timeline)
     
-    #if (agCount >2000): agCount=2000
+    #if (agCount >200000): agCount=200000
     
-    #mydDCAtest = dDCA(2, agCount, 100)
-    mydDCAtest = dDCA(100, agCount, 1000)
+    mydDCAtest = dDCA(2, agCount, 100)
+    #mydDCAtest = dDCA(100, agCount, 1000)
         
     print ("Using an ANTIGEN count of ", agCount)
     
@@ -180,10 +179,10 @@ if __name__ == '__main__':
         
     if (agCount < len(summary_timeline)): summary_timeline = summary_timeline.head(agCount)
     
-    summary_timeline['100 cell MCAV'] = mydDCAtest.mcav
-    summary_timeline['100 cell ka'] = mydDCAtest.ka
-    summary_timeline['MCAV difference'] = summary_timeline['100 cell MCAV'] - summary_timeline['mcav']
-    summary_timeline['ka difference'] = summary_timeline['100 cell ka'] - summary_timeline['ka']
+    summary_timeline['new mcav'] = mydDCAtest.mcav
+    summary_timeline['new ka'] = mydDCAtest.ka
+    summary_timeline['mcav difference'] = summary_timeline['new mcav'] - summary_timeline['mcav']
+    summary_timeline['ka difference'] = summary_timeline['new ka'] - summary_timeline['ka']
     
     print ("Aggregated difference in results is.... ", 
-           (summary_timeline['MCAV difference'] + summary_timeline['ka difference']).sum())
+           (summary_timeline['mcav difference'] + summary_timeline['ka difference']).sum())
