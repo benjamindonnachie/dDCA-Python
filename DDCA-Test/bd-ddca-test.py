@@ -186,7 +186,7 @@ if __name__ == '__main__' :
     #directory = "/home/benjamindonnachie/Documents/plaso-v20210606-Nov_run/"
     #directory = "/home/benjamindonnachie/Documents/plaso-v20220129-March_run/"
     #directory = "/run/media/benjamindonnachie/PhD Data/202203 Run_Yara/MT_Test/"
-    directory = "/Volumes/EXTERNAL/PhD/Upgrade/202203 Run_Yara/MT_test/"
+    directory = "../Data sets/"
  
     file_list = []
     STARTdate = '2015-01-01 00:00:00'
