@@ -7,28 +7,7 @@ Implementation of Deterministic Dendritic Cell Algorithm
 
 @author: Benjamin Donnachie  <benjamin.donnachie@open.ac.uk>
 
-Licence: TBC
-
-
-This code take exports from plaso in dynamic format (essentially CSV)
-
-Basic structure:
-   Read *.dyn files in from directory.
-    Import CSV data into pandas
-    Resample per Xmins
-    Graph timeline
-    Calculate safe and danger values
-    Graph safe and danger values
-    Run through DDCA to calculate MCAV and Ka
-    Graph MCAV and Ka
-   Repeat
-
-To do:
-    Runs slowly compared with original C code : replace for loops with vectors.
-    Implement functions
-
-Notes:
-    Check do_antigen() and do_signals() are in the correct order.
+Licence: CC-BY-SA-NC
 
 Change log:
     
@@ -41,18 +20,21 @@ Change log:
     2022/04/10 Reverse antigen and signal.  Introduce date ranges for graph
     2022/04/11 Change danger signal to use logarithmic ratios.  Use date ranges for calculations.
     2022/09/25 Implement object based code
+    2024/06/30 Replaced for loops with vectors and general tidy
 
-Invoke plaso / log2timeline with:
+Using docker for reproducibility.  Invoke plaso / log2timeline with:
     
-    log2timeline.py --vss-stores all --partitions all --volumes all --yara-rules index.yar evidence.E01 
     
-    psort.py -o dynamic --additional_fields yara_match --dynamic-time --status-view window -w outfile_yara.dyn infile.plaso 
+    docker run -v /mnt/evidence/:/data/ log2timeline/plaso:latest log2timeline --vss_stores all --partitions all --volumes all --hashers md5,sha1,sha256 --parsers win7_slow --yara-rules /data/yara-rules-full_20240602.yar --storage_file /data/evidence.plaso /data/evidence.E01
+    docker run -v /mnt/evidence/:/data/ log2timeline/plaso:latest psort --analysis browser_search,chrome_extension,sessionize,unique_domains_visited -o null /data/evidence.plaso
+    docker run -v /mnt/evidence/:/data/ log2timeline/plaso:latest psort -o dynamic --fields datetime,MACB,source,sourcetype,type,user,host,short,desc,version,filename,inode,notes,format,extra,yara_match,file_entropy,md5_hash,sha1_hash,sha256_hash,tag,message,message_short -w /data/evidence.plaso.csv /data/evidence.plaso
     
-    Then use outfile_yara.dyn as input to this code.
+    Then use evidence.plaso.csv to derive antigen, safe and danger signals
+      for this code.
 
 """
 import numpy as np
-import pandas as pd
+
 
 class dDCA_cells:
     def __init__(self, cellid, maxCells, maxMigration, antigenCount):
@@ -93,15 +75,22 @@ class dDCA:
         self.ka = np.zeros(antigenCount)
         
         # Create dendritic cells.
-        self.DCs = [ dDCA_cells(i, cells, maxMigration, antigenCount) 
-               for i in range (cells) ]
+        self.DCs = [ dDCA_cells(thisCell, cells, maxMigration, antigenCount) 
+               for thisCell in range (cells) ]
+
 
 
     def doSignals (self, danger, safe):
-        csm = danger + safe
-        k = danger - (2 * safe)
-        
-        [ self.updateDC(k, csm, j) for j in range (self.cells) ]
+        # Combined with updateDC for cleaner code
+        for eachCell in (self.DCs):
+            eachCell.lifespan -= (danger + safe)
+            eachCell.k += (danger) - (2 * safe)
+            eachCell.iter += 1
+            if (eachCell.lifespan <= 0):
+                # If lifespan exhausted, pass antigen to master antigen profile
+                self.logAntigen(eachCell.id)
+                # reinitialise
+                eachCell.reset()
     
 
     def doAntigen (self, antigen):
@@ -112,30 +101,17 @@ class dDCA:
         self.DCs[self.cellIndex].antigen[antigen] += 1
         
 
-    def updateDC(self, K, csm, j):
-        # consider moving to a function of dDCA_cells - although needs to call
-        # logAntigen function, could return lifespan.
-        self.DCs[j].lifespan -= csm
-        self.DCs[j].k += K
-        self.DCs[j].iter += 1
-        
-        if (self.DCs[j].lifespan <= 0):
-            # If lifespan exhausted, pass antigen to master antigen profile
-            self.logAntigen(j)
-            # reinitialise
-            self.DCs[j].reset()
-           
 
     def logAntigen(self, cellid):
+        # First check if anything to log...
         if (np.count_nonzero(self.DCs[cellid].antigen) > 0) :
-            for antigenCounter in (self.DCs[cellid].antigen.nonzero()) :
-                self.DCs[cellid].TotAntigen += self.DCs[cellid].antigen[antigenCounter]
-                #  Note, antigenCounter starts at zero so need to +1 below.
-                self.k[antigenCounter] += self.DCs[cellid].k * (1 + self.DCs[cellid].antigen[antigenCounter])
-                if (self.DCs[cellid].k > 0) :
-                    self.m[antigenCounter] += (1 + self.DCs[cellid].antigen[antigenCounter])
-                else:
-                    self.s[antigenCounter] += (1 + self.DCs[cellid].antigen[antigenCounter])                                
+            self.DCs[cellid].TotAntigen += self.DCs[cellid].antigen.sum()
+            self.k += (self.DCs[cellid].antigen) * self.DCs[cellid].k
+            if (self.DCs[cellid].k > 0): # gt zero, log as anomaly (mature)
+                self.m += self.DCs[cellid].antigen
+            else: # otherwise log as safe - semi-mature
+                self.s +=  self.DCs[cellid].antigen
+        
             self.DCs[cellid].antigen = np.zeros(self.antigen, dtype=np.int32)
 
           
@@ -148,41 +124,55 @@ class dDCA:
 
 
 if __name__ == '__main__':
-    # if running as a script, create test object
-#    mydDCAtest = dDCA (2, 8, 100)
-#    mydDCAtest.doSignals(25,75)
-#    mydDCAtest.doAntigen(1)
-#    mydDCAtest.doSignals(50,50)
-#    mydDCAtest.doAntigen(2)
-#    mydDCAtest.doSignals(100,0)
-#    mydDCAtest.doAntigen(3)
-#    mydDCAtest.results()
+
+    # Tested against original dDCA (with correction for time interval typed as
+    #  a float and then an int) and only difference relates to number of
+    #  significant digits used.
     
-    summary_timeline = pd.read_pickle("/Volumes/EXTERNAL/PhD/Upgrade/202203 Run_Yara/MT_test/20220309T203701-Case1-Webserver.E01.plaso_yara.dyn-1minea2015-2018.pkl")
+    import pandas as pd
+    import time
     
-    agCount = len(summary_timeline)
+    # values to initialise DDCA
+    CELLS = 100
+    MAXmigration = 100
+    MAXvalue = 100
     
-    #if (agCount >200000): agCount=200000
+    x = 'C:\\Users\\benja\\Documents\\Test images\\Initial analysis_Win network_20240601\\20240212-decrypted-Windows_Server_2022.dd.plaso-with_messsage.csv-preprocessed_danger.pkl-preprocessed_summary-60min--100_cells-100_maxmig.pkl'
+
+    print ("Loading pickles...")
     
-    mydDCAtest = dDCA(2, agCount, 100)
-    #mydDCAtest = dDCA(100, agCount, 1000)
+    summary_timeline = pd.read_pickle(x)
+    
+    STARTdate = '2023-01-01 00:00:00'
+    ENDdate = '2024-06-30 23:59:59'
+    
+    summary_timeline_test = summary_timeline [(summary_timeline.index >= STARTdate) & (summary_timeline.index <= ENDdate)]
+    
+    ANTIGEN = len(summary_timeline_test)
+    print("Using ANTIGEN count of", ANTIGEN)
+    testdDCA = dDCA(CELLS, ANTIGEN, MAXmigration)
+    
+    start = time.time()
+    
+    for curAntigen in range (ANTIGEN) :
+        if (curAntigen % 5000 == 0) : print ("*", end='')
+    
+        # As per paper, antigen first
+        # Gu, Feng, Julie Greensmith, and Uwe Aickelin. ‘Integrating Real-Time Analysis with the Dendritic Cell Algorithm through Segmentation’. In Proceedings of the 11th Annual Conference on Genetic and Evolutionary Computation, 1203–10. Montreal Québec Canada: ACM, 2009. https://doi.org/10.1145/1569901.1570063.
+    
+        testdDCA.doAntigen(curAntigen)
         
-    print ("Using an ANTIGEN count of ", agCount)
+        safe = summary_timeline_test.iloc[curAntigen]['safe']
+        danger = summary_timeline_test.iloc[curAntigen]['danger_max']
     
-    for i in range (agCount) :
-        if (i % 5000 == 0) : print (".", end='')
-        mydDCAtest.doAntigen(i)
-        mydDCAtest.doSignals(summary_timeline['danger'][i], summary_timeline['safe'][i])
-    print("")
+        testdDCA.doSignals(danger, safe)
+     
+    testdDCA.results()
     
-    mydDCAtest.results()
+    end = time.time()
+    
+    summary_timeline_test['mcav_newdDCA'] = testdDCA.mcav
+    summary_timeline_test['ka_newdDCA'] = testdDCA.ka
         
-    if (agCount < len(summary_timeline)): summary_timeline = summary_timeline.head(agCount)
+    print("Time taken: ", end - start)
     
-    summary_timeline['new mcav'] = mydDCAtest.mcav
-    summary_timeline['new ka'] = mydDCAtest.ka
-    summary_timeline['mcav difference'] = summary_timeline['new mcav'] - summary_timeline['mcav']
-    summary_timeline['ka difference'] = summary_timeline['new ka'] - summary_timeline['ka']
-    
-    print ("Aggregated difference in results is.... ", 
-           (summary_timeline['mcav difference'] + summary_timeline['ka difference']).sum())
