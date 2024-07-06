@@ -81,14 +81,16 @@ class dDCA:
 
 
     def doSignals (self, danger, safe):
+        csm = (danger + safe)
+        k = (danger) - (2 * safe)
         # Combined with updateDC for cleaner code
         for eachCell in (self.DCs):
-            eachCell.lifespan -= (danger + safe)
-            eachCell.k += (danger) - (2 * safe)
+            eachCell.lifespan -= csm
+            eachCell.k += k
             eachCell.iter += 1
             if (eachCell.lifespan <= 0):
                 # If lifespan exhausted, pass antigen to master antigen profile
-                self.logAntigen(eachCell.id)
+                self.logAntigen(eachCell)
                 # reinitialise
                 eachCell.reset()
     
@@ -102,22 +104,21 @@ class dDCA:
         
 
 
-    def logAntigen(self, cellid):
+    def logAntigen(self, thisCell):
         # First check if anything to log...
-        if (np.count_nonzero(self.DCs[cellid].antigen) > 0) :
-            self.DCs[cellid].TotAntigen += self.DCs[cellid].antigen.sum()
-            self.k += (self.DCs[cellid].antigen) * self.DCs[cellid].k
-            if (self.DCs[cellid].k > 0): # gt zero, log as anomaly (mature)
-                self.m += self.DCs[cellid].antigen
+        if (np.count_nonzero(thisCell.antigen) > 0) :
+            thisCell.TotAntigen += thisCell.antigen.sum()
+            self.k += (thisCell.antigen) * thisCell.k
+            if (thisCell.k > 0): # gt zero, log as anomaly (mature)
+                self.m += thisCell.antigen
             else: # otherwise log as safe - semi-mature
-                self.s +=  self.DCs[cellid].antigen
-        
-            self.DCs[cellid].antigen = np.zeros(self.antigen, dtype=np.int32)
+                self.s +=  thisCell.antigen
+            thisCell.antigen = np.zeros(self.antigen, dtype=np.int32)
 
           
     def results(self):
         # First flush antigen
-        [ self.logAntigen(p) for p in range (self.cells)]
+        [ self.logAntigen(eachCell) for eachCell in range (self.cells)]
         # Calculate anomaly metrics (mcav and ka)
         self.mcav = self.m / (self.m + self.s)
         self.ka = self.k / (self.m + self.s)
