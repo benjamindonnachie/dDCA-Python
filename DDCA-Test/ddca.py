@@ -24,7 +24,7 @@ Change log:
     2024/07/06 Tuning.  Implemented 'single antigen' variant
     2024/07/08 Replace lists with np arrays.  Restored previous multi-antigen 
                 functionality using lists for local cell antigen profile. 
-                Removed 'legacy' historicl variables used for metrics.
+                Removed 'legacy' historical variables used for metrics.
                 Significant performance increase - from 9.66 sec on test dataset 
                 of 13,128 entries down to 0.64 sec (Apple Silicon M3)
                 
@@ -86,7 +86,7 @@ class dDCA:
                 eachCell.reset() # reinitialise
 
     def doAntigen (self, antigen):    
-        # Adcance cell and record antigen profile
+        # Advance cell and record antigen profile
         next(self.activeCell).antigen.append(antigen)        
 
     def logAntigen(self, thisCell):
