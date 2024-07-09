@@ -21,7 +21,13 @@ Change log:
     2022/04/11 Change danger signal to use logarithmic ratios.  Use date ranges for calculations.
     2022/09/25 Implement object based code
     2024/06/30 Replaced for loops with vectors and general tidy
-
+    2024/07/06 Tuning.  Implemented 'single antigen' variant
+    2024/07/08 Replace lists with np arrays.  Restored previous multi-antigen 
+                functionality using lists for local cell antigen profile. 
+                Removed 'legacy' historicl variables used for metrics.
+                Significant performance increase - from 9.66 sec on test dataset 
+                of 13,128 entries down to 0.64 sec (Apple Silicon M3)
+                
 Using docker for reproducibility.  Invoke plaso / log2timeline with:
     
     
@@ -34,29 +40,19 @@ Using docker for reproducibility.  Invoke plaso / log2timeline with:
 
 """
 import numpy as np
-
+import itertools
 
 class dDCA_cells:
-    def __init__(self, cellid, maxCells, maxMigration, antigenCount):
+    def __init__(self, cellid, TotCells, maxMigration, antigenCount):
             # Initialise dDCA cell using variables from original code
-            self.id = cellid  # id of this cell
-            # evenly distribute migration count across cells
-            self.maxLifespan = cellid * maxMigration / (maxCells - 1)
+            self.maxLifespan = cellid * maxMigration / (TotCells - 1) # evenly distribute migration count across cells
             self.lifespan = self.maxLifespan
             self.k = float(0.0)
-            self.TotIter = 0
-            self.iter = 0
-            self.TotAntigen = 0
-            self.incarnations = 0
-            self.antigen = np.zeros(antigenCount, dtype=np.int32)
+            self.antigen = []
 
     def reset(self):
             self.lifespan = self.maxLifespan
             self.k = float(0.0)
-            self.TotIter += self.iter
-            self.iter = 0
-            self.TotAntigen = 0 # Total antigen a DC collected per incarnation
-            self.incarnations += 1
         
 
 class dDCA:
@@ -65,60 +61,47 @@ class dDCA:
         self.cells = cells
         self.maxMigration = maxMigration
         self.antigen = antigenCount
-        self.cellIndex = 0  # counter to distribute antigen between cells
-        
-        # Overall agtype
-        self.s = np.zeros(antigenCount)
-        self.m = np.zeros(antigenCount)
-        self.k = np.zeros(antigenCount)
-        self.mcav = np.zeros(antigenCount)
-        self.ka = np.zeros(antigenCount)
-        
+                
+        # Overall master agtype antigen profile
+        self.s = np.zeros(self.antigen, 'i')
+        self.m = np.zeros(self.antigen, 'i')
+        self.k = np.zeros(self.antigen, 'f')
+
         # Create dendritic cells.
-        self.DCs = [ dDCA_cells(thisCell, cells, maxMigration, antigenCount) 
-               for thisCell in range (cells) ]
-
-
+        self.DCs = [ dDCA_cells(eachCell, cells, maxMigration, antigenCount) 
+               for eachCell in range (cells) ]
+        self.activeCell = itertools.cycle(self.DCs)
+        # Start with first cell
+        next(self.activeCell)
 
     def doSignals (self, danger, safe):
-        csm = (danger + safe)
-        k = (danger) - (2 * safe)
-        # Combined with updateDC for cleaner code
-        for eachCell in (self.DCs):
+        csm = danger + safe
+        k = danger - (2 * safe)
+        
+        for eachCell in self.DCs:  
             eachCell.lifespan -= csm
             eachCell.k += k
-            eachCell.iter += 1
-            if (eachCell.lifespan <= 0):
-                # If lifespan exhausted, pass antigen to master antigen profile
-                self.logAntigen(eachCell)
-                # reinitialise
-                eachCell.reset()
-    
+            if (eachCell.lifespan <= 0): # If lifespan exhausted, pass antigen to master antigen profile
+                if (eachCell.antigen): self.logAntigen(eachCell)
+                eachCell.reset() # reinitialise
 
-    def doAntigen (self, antigen):
-        # Increment counter to distribute between cells.
-        self.cellIndex += 1
-        self.cellIndex %= self.cells
-        
-        self.DCs[self.cellIndex].antigen[antigen] += 1
-        
-
+    def doAntigen (self, antigen):    
+        # Adcance cell and record antigen profile
+        next(self.activeCell).antigen.append(antigen)        
 
     def logAntigen(self, thisCell):
-        # First check if anything to log...
-        if (np.count_nonzero(thisCell.antigen) > 0) :
-            thisCell.TotAntigen += thisCell.antigen.sum()
-            self.k += (thisCell.antigen) * thisCell.k
+        for eachAntigen in thisCell.antigen:
+            self.k[eachAntigen] += thisCell.k
             if (thisCell.k > 0): # gt zero, log as anomaly (mature)
-                self.m += thisCell.antigen
+                self.m[eachAntigen] += 1
             else: # otherwise log as safe - semi-mature
-                self.s +=  thisCell.antigen
-            thisCell.antigen = np.zeros(self.antigen, dtype=np.int32)
+                self.s[eachAntigen] += 1
+        thisCell.antigen = []
 
-          
     def results(self):
         # First flush antigen
-        [ self.logAntigen(eachCell) for eachCell in range (self.cells)]
+        [ self.logAntigen(eachCell) for eachCell in self.DCs]
+        
         # Calculate anomaly metrics (mcav and ka)
         self.mcav = self.m / (self.m + self.s)
         self.ka = self.k / (self.m + self.s)
@@ -132,15 +115,18 @@ if __name__ == '__main__':
     
     import pandas as pd
     import time
+    import sys
     
     # values to initialise DDCA
     CELLS = 100
     MAXmigration = 100
     MAXvalue = 100
     
-    x = 'C:\\Users\\benja\\Documents\\Test images\\Initial analysis_Win network_20240601\\20240212-decrypted-Windows_Server_2022.dd.plaso-with_messsage.csv-preprocessed_danger.pkl-preprocessed_summary-60min--100_cells-100_maxmig.pkl'
+    x = '20240212-decrypted-Windows_Server_2022.dd.plaso-with_messsage.csv-preprocessed_danger.pkl-preprocessed_summary-60min--100_cells-100_maxmig.pkl'
 
     print ("Loading pickles...")
+    
+    spinner = itertools.cycle(['-', '/', '|', '\\'])
     
     summary_timeline = pd.read_pickle(x)
     
@@ -156,8 +142,11 @@ if __name__ == '__main__':
     start = time.time()
     
     for curAntigen in range (ANTIGEN) :
-        if (curAntigen % 5000 == 0) : print ("*", end='')
-    
+        if (curAntigen % 5000 == 0) : 
+            sys.stdout.write(next(spinner))   # write the next character
+            sys.stdout.flush()                # flush stdout buffer (actual character display)
+            sys.stdout.write('\b')            # erase the last written char
+            
         # As per paper, antigen first
         # Gu, Feng, Julie Greensmith, and Uwe Aickelin. ‘Integrating Real-Time Analysis with the Dendritic Cell Algorithm through Segmentation’. In Proceedings of the 11th Annual Conference on Genetic and Evolutionary Computation, 1203–10. Montreal Québec Canada: ACM, 2009. https://doi.org/10.1145/1569901.1570063.
     
@@ -176,4 +165,3 @@ if __name__ == '__main__':
     summary_timeline_test['ka_newdDCA'] = testdDCA.ka
         
     print("Time taken: ", end - start)
-    
