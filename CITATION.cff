@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use dDCA in research, please cite this software and the foundational dDCA publications."
+title: "dDCA: deterministic dendritic cell analysis for research pipelines"
+type: software
+authors:
+  - family-names: Donnachie
+    given-names: Benjamin
+version: 9.0.0
+date-released: 2026-07-19
+license: CC-BY-NC-SA-4.0
+keywords:
+  - deterministic dendritic cell algorithm
+  - artificial immune systems
+  - anomaly detection
+  - research pipeline
+references:
+  - type: conference-paper
+    title: "The Deterministic Dendritic Cell Algorithm"
+    authors:
+      - family-names: Greensmith
+        given-names: Julie
+      - family-names: Aickelin
+        given-names: Uwe
+    year: 2008
+    doi: 10.1007/978-3-540-85072-4_26
+  - type: conference-paper
+    title: "Integrating Real-Time Analysis with the Dendritic Cell Algorithm through Segmentation"
+    authors:
+      - family-names: Gu
+        given-names: Feng
+      - family-names: Greensmith
+        given-names: Julie
+      - family-names: Aickelin
+        given-names: Uwe
+    year: 2009
+    doi: 10.1145/1569901.1570063

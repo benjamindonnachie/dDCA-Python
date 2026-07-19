@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77", "wheel", "Cython>=3.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ddca"
+version = "9.0.0"
+description = "Deterministic dendritic cell analysis for research pipelines"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "CC-BY-NC-SA-4.0"
+authors = [
+  {name = "Benjamin Donnachie", email = "benjamin.donnachie@open.ac.uk"},
+]
+dependencies = ["numpy>=1.24"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+stats = ["pandas>=2.0"]
+build = ["Cython>=3.0"]
+test = ["Cython>=3.0", "pandas>=2.0"]
+
+[tool.setuptools]
+py-modules = ["ddca"]
